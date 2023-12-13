@@ -1,0 +1,6 @@
+name: AutoTreeChopper
+api-version: 1.20
+version: 1.0
+author: Bohdan
+main: plugin.java.AutoTreeChopperPlugin
+description: Plugin for chopping the trees
