@@ -19,6 +19,9 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
 import java.util.logging.Level;
+import java.util.stream.IntStream;
+
+import static org.bukkit.Material.*;
 
 public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
 
@@ -38,10 +41,16 @@ public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
 
     //three types of material to lunch machine
     private final Set<Material> MACHINE_BLOCKS = new HashSet<>(List.of(
-            Material.DIAMOND_BLOCK,
-            Material.EMERALD_BLOCK,
-            Material.GOLD_BLOCK
+            DIAMOND_BLOCK,
+            EMERALD_BLOCK,
+            GOLD_BLOCK
     ));
+
+    Map<Material, Integer> speedOfEveryMaterialMap = Map.of(
+            DIAMOND_BLOCK, 0,
+            EMERALD_BLOCK, 20,
+            GOLD_BLOCK, 40
+    );
 
     private Chest activeChest = null;
     private ArmorStand choppingMachine = null;
@@ -101,7 +110,7 @@ public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
         if (MACHINE_BLOCKS.contains(blockUnder.getType())) {
             return blockUnder.getType();
         } else {
-            return Material.DIAMOND_BLOCK;
+            return DIAMOND_BLOCK;
         }
     }
 
@@ -233,40 +242,32 @@ public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
                 .stream()
                 .toList();
 
-        for (Entity entity : nearbyEntities) {
-            if (entity.getLocation().distanceSquared(location) < 2 && !entity.isDead()) {
-                ItemStack itemStack = ((Item) entity).getItemStack();
-                Map<Integer, ItemStack> remaining;
+        nearbyEntities.forEach(
+                entity -> {
 
-                synchronized (activeChest.getBlockInventory()) {
-                    remaining = activeChest.getBlockInventory().addItem(itemStack);
-                }
+                    if (entity.getLocation().distanceSquared(location) < 2 && !entity.isDead()) {
+                        ItemStack itemStack = ((Item) entity).getItemStack();
+                        Map<Integer, ItemStack> remaining;
 
-                if (remaining.isEmpty()) {
-                    entity.remove();
+                        synchronized (activeChest.getBlockInventory()) {
+                            remaining = activeChest.getBlockInventory().addItem(itemStack);
+                        }
+
+                        if (remaining.isEmpty()) {
+                            entity.remove();
+                        }
+                    }
                 }
-            }
-        }
+        );
     }
 
     //chopping delay when diamond, gold ...
     private int getChoppingDelay(Material bitMaterial) {
-        switch (bitMaterial) {
-            case DIAMOND_BLOCK -> {
-                return 0;
-            }
-            case EMERALD_BLOCK -> {
-                getLogger().info("Chopping machine with Emerald block encountered. Applying unique bonus feature");
-                playParticleEffects(choppingMachine.getLocation());
-                return 20;
-            }
-            case GOLD_BLOCK -> {
-                return 40;
-            }
-            default -> {
-                return 20;
-            }
+        if (bitMaterial.equals(EMERALD_BLOCK)) {
+            getLogger().info("Chopping machine with Emerald block encountered. Applying unique bonus feature");
+            playParticleEffects(choppingMachine.getLocation());
         }
+        return speedOfEveryMaterialMap.getOrDefault(bitMaterial,20);
     }
 
     //play particle effect
@@ -286,12 +287,8 @@ public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
             }
 
             Location targetLocation = findTreeLocation(chest.getLocation(), 40);
-            if (targetLocation != null) {
-                moveMachine(targetLocation);
-                chopTree(targetLocation.getBlock(), null, getBitMaterial(targetLocation.getBlock()));
-            } else {
-                deactivateMachine();
-            }
+            moveMachine(targetLocation);
+            chopTree(targetLocation.getBlock(), null, getBitMaterial(targetLocation.getBlock()));
         }, 0L, 20L).getTaskId();
 
         chest.setMetadata("AutoTreeChopperTask", new FixedMetadataValue(this, taskId));
@@ -322,18 +319,17 @@ public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
         int startY = startLocation.getBlockY();
         int startZ = startLocation.getBlockZ();
 
-        for (int x = startX - radius; x <= startX + radius; x++) {
-            for (int z = startZ - radius; z <= startZ + radius; z++) {
-                for (int y = startY - radius; y <= startY + radius; y++) {
-                    Block block = Objects.requireNonNull(world).getBlockAt(x, y, z);
-                    if (LOGS_TYPES.contains(block.getType())) {
-                        return block.getLocation();
-                    }
-                }
-            }
-        }
-
-        return null;
+        return IntStream.rangeClosed(startX - radius, startX + radius)
+                .boxed()
+                .flatMap(x -> IntStream.rangeClosed(startZ - radius, startZ + radius)
+                        .boxed()
+                        .flatMap(z -> IntStream.rangeClosed(startY - radius, startY + radius)
+                                .mapToObj(y -> Objects
+                                        .requireNonNull(world)
+                                        .getBlockAt(x, y, z))
+                                .filter(block -> LOGS_TYPES.contains(block.getType()))
+                                .map(Block::getLocation)))
+                .findFirst().get();
     }
 
     // move invisible machine to chop
@@ -355,20 +351,22 @@ public class AutoTreeChopperPlugin extends JavaPlugin implements Listener {
 
     private List<Block> getAdjacentLogs(Block block) {
         List<Block> logs = new ArrayList<>();
-        for (Block relative : getAdjacentBlocks(block)) {
-            if (LOGS_TYPES.contains(relative.getType())) {
-                logs.add(relative);
-            }
-        }
+        getAdjacentBlocks(block)
+                .forEach(
+                        currentBlock ->  {
+                            if(LOGS_TYPES.contains(currentBlock.getType())){
+                                logs.add(currentBlock);
+                            }
+                        }
+                );
         return logs;
     }
 
     private List<Block> getAdjacentBlocks(Block block) {
         List<Block> adjacentBlocks = new ArrayList<>();
-        for (BlockFace face : BlockFace.values()) {
-            Block relative = block.getRelative(face);
-            adjacentBlocks.add(relative);
-        }
+        Arrays.stream(BlockFace.values()).forEach(
+                blockFace -> adjacentBlocks.add(block.getRelative(blockFace))
+        );
         return adjacentBlocks;
     }
 }
